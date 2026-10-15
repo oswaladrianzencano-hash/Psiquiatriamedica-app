@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestión Pacientes - Psiquiatría</title>
+    <style>
+        :root {
+            --primary: #2c3e50;
+            --secondary: #3498db;
+            --bg: #f4f7f6;
+            --white: #ffffff;
+            --text: #333;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        h1, h2 {
+            color: var(--primary);
+        }
+        .card {
+            background: var(--white);
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input, textarea, select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            box-sizing: border-box;
+        }
+        .btn {
+            background-color: var(--secondary);
+            color: white;
+            padding: 10px 15px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        .btn:hover {
+            background-color: #2980b9;
+        }
+        .btn-danger {
+            background-color: #e74c3c;
+        }
+        .search-bar {
+            margin-bottom: 15px;
+        }
+        .patient-item {
+            border-bottom: 1px solid #eee;
+            padding: 10px 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .cie10-list {
+            max-height: 120px;
+            overflow-y: auto;
+            background: #fff;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            margin-top: 5px;
+        }
+        .cie10-item {
+            padding: 8px;
+            cursor: pointer;
+        }
+        .cie10-item:hover {
+            background-color: #f0f0f0;
+        }
+        .pdf-list {
+            margin-top: 10px;
+        }
+        .pdf-item {
+            background: #eef;
+            padding: 5px 10px;
+            margin-bottom: 5px;
+            border-radius: 3px;
+            display: flex;
+            justify-content: space-between;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Gestión de Pacientes Psiquiátricos</h1>
+
+    <!-- FORMULARIO DE REGISTRO -->
+    <div class="card">
+        <h2>Registrar Nuevo Paciente</h2>
+        <form id="patientForm">
+            <div class="form-group">
+                <label>DNI / Documento:</label>
+                <input type="text" id="dni" required>
+            </div>
+            <div class="form-group">
+                <label>Nombre Completo:</label>
+                <input type="text" id="nombre" required>
+            </div>
+            <div class="form-group">
+                <label>Celular:</label>
+                <input type="tel" id="celular">
+            </div>
+            <div class="form-group">
+                <label>Edad:</label>
+                <input type="number" id="edad">
+            </div>
+            <div class="form-group">
+                <label>Diagnóstico (CIE-10 Frecuente):</label>
+                <input type="text" id="cieSearch" placeholder="Buscar CIE-10 (Ej. F32, F41, F20)..." onkeyup="searchCIE10()">
+                <div id="cieResults" class="cie10-list" style="display:none;"></div>
+            </div>
+            <div class="form-group">
+                <label>Observaciones / Historia Clínica:</label>
+                <textarea id="observaciones" rows="3"></textarea>
+            </div>
+            <div class="form-group">
+                <label>Receta / Tratamiento:</label>
+                <textarea id="receta" rows="3"></textarea>
+            </div>
+            <div class="form-group">
+                <label>Subir Certificados (PDF):</label>
+                <input type="file" id="certificados" accept="application/pdf" multiple>
+            </div>
+            <button type="submit" class="btn">Guardar Paciente</button>
+        </form>
+    </div>
+
+    <!-- BÚSQUEDA Y LISTA DE PACIENTES -->
+    <div class="card">
+        <h2>Listado de Pacientes</h2>
+        <input type="text" id="searchPatient" class="search-bar" placeholder="Buscar por DNI o Nombre..." onkeyup="filterPatients()">
+        <div id="patientList"></div>
+    </div>
+</div>
+
+<script>
+    // Códigos CIE-10 psiquiátricos más comunes
+    const cie10Data = [
+        { code: "F32", name: "Episodio depresivo" },
+        { code: "F33", name: "Trastorno depresivo recurrente" },
+        { code: "F41.1", name: "Trastorno de ansiedad generalizada" },
+        { code: "F41.0", name: "Trastorno de pánico" },
+        { code: "F42", name: "Trastorno obsesivo-compulsivo" },
+        { code: "F20", name: "Esquizofrenia" },
+        { code: "F31", name: "Trastorno afectivo bipolar" },
+        { code: "F43.1", name: "Trastorno de estrés postraumático" },
+        { code: "F10", name: "Trastornos mentales debido al uso de alcohol" },
+        { code: "F90", name: "Trastornos hipercinéticos (TDAH)" }
+    ];
+
+    // Configuración de IndexedDB para almacenamiento local persistente y privado
+    let db;
+    const request = indexedDB.open("PsiquiatriaDB", 1);
+
+    request.onupgradeneeded = function(e) {
+        db = e.target.result;
+        db.createObjectStore("pacientes", { keyPath: "dni" });
+    };
+
+    request.onsuccess = function(e) {
+        db = e.target.result;
+        loadPatients();
+    };
+
+    function searchCIE10() {
+        const query = document.getElementById("cieSearch").value.toLowerCase();
+        const resultsDiv = document.getElementById("cieResults");
+        resultsDiv.innerHTML = "";
+        
+        if (query.trim() === "") {
+            resultsDiv.style.display = "none";
+            return;
+        }
+
+        const filtered = cie10Data.filter(item => 
+            item.code.toLowerCase().includes(query) || item.name.toLowerCase().includes(query)
+        );
+
+        if (filtered.length > 0) {
+            resultsDiv.style.display = "block";
+            filtered.forEach(item => {
+                const div = document.createElement("div");
+                div.className = "cie10-item";
+                div.innerText = `${item.code} - ${item.name}`;
+                div.onclick = function() {
+                    document.getElementById("cieSearch").value = `${item.code} - ${item.name}`;
+                    resultsDiv.style.display = "none";
+                };
+                resultsDiv.appendChild(div);
+            });
+        } else {
+            resultsDiv.style.display = "none";
+        }
+    }
+
+    document.getElementById("patientForm").onsubmit = async function(e) {
+        e.preventDefault();
+
+        const filesInput = document.getElementById("certificados");
+        const filesPromises = Array.from(filesInput.files).map(file => {
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve({ name: file.name, data: reader.result });
+                reader.readAsDataURL(file);
+            });
+        });
+
+        const pdfFiles = await Promise.all(filesPromises);
+
+        const patient = {
+            dni: document.getElementById("dni").value,
+            nombre: document.getElementById("nombre").value,
+            celular: document.getElementById("celular").value,
+            edad: document.getElementById("edad").value,
+            cie10: document.getElementById("cieSearch").value,
+            observaciones: document.getElementById("observaciones").value,
+            receta: document.getElementById("receta").value,
+            certificados: pdfFiles
+        };
+
+        const tx = db.transaction("pacientes", "readwrite");
+        const store = tx.objectStore("pacientes");
+        store.put(patient);
+
+        tx.oncomplete = function() {
+            alert("Paciente guardado correctamente.");
+            document.getElementById("patientForm").reset();
+            loadPatients();
+        };
+    };
+
+    function loadPatients() {
+        const list = document.getElementById("patientList");
+        list.innerHTML = "";
+
+        const tx = db.transaction("pacientes", "readonly");
+        const store = tx.objectStore("pacientes");
+        const request = store.getAll();
+
+        request.onsuccess = function() {
+            const patients = request.result;
+            patients.forEach(patient => {
+                const div = document.createElement("div");
+                div.className = "patient-item";
+                div.innerHTML = `
+                    <div>
+                        <strong>${patient.nombre}</strong> (DNI: ${patient.dni}) - Edad: ${patient.edad || 'N/A'}<br>
+                        <small><strong>CIE-10:</strong> ${patient.cie10 || 'No asignado'}</small><br>
+                        <small><strong>Celular:</strong> ${patient.celular || 'N/A'}</small><br>
+                        <small><strong>Observaciones:</strong> ${patient.observaciones || 'Sin registros'}</small><br>
+                        <small><strong>Receta:</strong> ${patient.receta || 'Sin receta'}</small>
+                        <div class="pdf-list">
+                            ${patient.certificados ? patient.certificados.map(pdf => `
+                                <div class="pdf-item">
+                                    <span>📄 ${pdf.name}</span>
+                                    <a href="${pdf.data}" download="${pdf.name}">Descargar</a>
+                                </div>
+                            `).join('') : ''}
+                        </div>
+                    </div>
+                    <button class="btn btn-danger" onclick="deletePatient('${patient.dni}')">Eliminar</button>
+                `;
+                list.appendChild(div);
+            });
+        };
+    }
+
+    function deletePatient(dni) {
+        if (confirm("¿Está seguro de eliminar este registro?")) {
+            const tx = db.transaction("pacientes", "readwrite");
+            store = tx.objectStore("pacientes");
+            store.delete(dni);
+            tx.oncomplete = function() {
+                loadPatients();
+            };
+        }
+    }
+
+    function filterPatients() {
+        const query = document.getElementById("searchPatient").value.toLowerCase();
+        const items = document.querySelectorAll(".patient-item");
+        items.forEach(item => {
+            const text = item.innerText.toLowerCase();
+            item.style.display = text.includes(query) ? "flex" : "none";
+        });
+    }
+</script>
+</body>
+</html>
